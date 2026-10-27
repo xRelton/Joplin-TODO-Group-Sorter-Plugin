@@ -1,0 +1,16 @@
+{
+	"manifest_version": 1,
+	"id": "com.ori.todo-group-sorter",
+	"app_min_version": "3.7",
+	"version": "1.0.0",
+	"name": "TODO Group Sorter",
+	"description": "Plugin to group TODO lists inside Joplin notes and apply a sorting algorithm to them so that ticked items go to the bottom of the list.",
+	"author": "Ori Taylor",
+	"homepage_url": "",
+	"repository_url": "https://github.com/xRelton/Joplin-TODO-Group-Sorter-Plugin",
+	"keywords": [],
+	"categories": [],
+	"screenshots": [],
+	"icons": {},
+	"promo_tile": {}
+}

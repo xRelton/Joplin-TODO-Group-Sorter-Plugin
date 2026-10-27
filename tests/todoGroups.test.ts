@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { findTodoGroups, findGroupAtLine, splitLines } from '../src/todoGroups';
+import {
+	findTodoGroups,
+	findGroupAtLine,
+	sortAllTodoGroups,
+	sortTopLevelGroupAtLine,
+	splitLines,
+} from '../src/todoGroups';
 
 describe('findTodoGroups', () => {
 	it('finds a single group and ignores surrounding text', () => {
@@ -136,5 +142,86 @@ describe('findGroupAtLine', () => {
 
 	it('returns undefined for a line outside any group', () => {
 		expect(findGroupAtLine(groups, 2)).toBeUndefined();
+	});
+});
+
+describe('sortTopLevelGroupAtLine', () => {
+	it('stably moves checked tasks to the bottom with their indented content', () => {
+		const lines = [
+			'- [x] completed',
+			'  - [ ] child',
+			'- [ ] first open',
+			'  supporting note',
+			'- [ ] second open',
+		];
+
+		expect(sortTopLevelGroupAtLine(lines, 1)).toEqual({
+			lines: [
+				'- [ ] first open',
+				'  supporting note',
+				'- [ ] second open',
+				'- [x] completed',
+				'  - [ ] child',
+			],
+			group: { startLine: 0, endLine: 4 },
+		});
+	});
+
+	it('returns undefined when the cursor is outside a todo group', () => {
+		expect(sortTopLevelGroupAtLine(['plain text', '- [ ] task'], 0)).toBeUndefined();
+	});
+});
+
+describe('sortAllTodoGroups', () => {
+	it('sorts each group independently and preserves text between groups', () => {
+		const lines = [
+			'# Tasks',
+			'- [x] first done',
+			'- [ ] first open',
+			'',
+			'Keep this note between groups.',
+			'',
+			'- [X] second done',
+			'- [ ] second open',
+			'  - [x] child stays attached',
+			'## End',
+		];
+
+		expect(sortAllTodoGroups(lines)).toEqual({
+			lines: [
+				'# Tasks',
+				'- [ ] first open',
+				'- [x] first done',
+				'',
+				'Keep this note between groups.',
+				'',
+				'- [ ] second open',
+				'  - [x] child stays attached',
+				'- [X] second done',
+				'## End',
+			],
+			changedGroups: [
+				{ startLine: 1, endLine: 2 },
+				{ startLine: 6, endLine: 8 },
+			],
+		});
+	});
+
+	it('returns unchanged lines when there are no groups', () => {
+		const lines = ['# Note', 'plain text', '', '```', '- [ ] code', '```'];
+
+		expect(sortAllTodoGroups(lines)).toEqual({
+			lines,
+			changedGroups: [],
+		});
+	});
+
+	it('reports no changed groups when all groups are already sorted', () => {
+		const lines = ['- [ ] open', '- [x] done', '', '- [ ] another open'];
+
+		expect(sortAllTodoGroups(lines)).toEqual({
+			lines,
+			changedGroups: [],
+		});
 	});
 });

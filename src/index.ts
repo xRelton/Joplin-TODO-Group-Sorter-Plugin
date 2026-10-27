@@ -8,21 +8,55 @@ joplin.plugins.register({
 });*/
 
 import joplin from 'api';
-import { findTodoGroups, splitLines } from './todoGroups';
+import { ContentScriptType, MenuItemLocation } from 'api/types';
+
+const sortAtCursorCommand = 'com.ori.todo-group-sorter.sortAtCursor';
+const sortInNoteCommand = 'com.ori.todo-group-sorter.sortInNote';
 
 joplin.plugins.register({
 	onStart: async function () {
-		const logGroups = async () => {
-			const note = await joplin.workspace.selectedNote();
-			if (!note) {
-				return;
-			}
-			const groups = findTodoGroups(splitLines(note.body));
-			console.info('Todo groups:', JSON.stringify(groups));
-		};
+		console.info('Hello world. TODO Group Sorter plugin started!');
 
-		await joplin.workspace.onNoteSelectionChange(logGroups);
-		await joplin.workspace.onNoteChange(logGroups);
-		await logGroups();
+		await joplin.contentScripts.register(
+			ContentScriptType.CodeMirrorPlugin,
+			'com.ori.todo-group-sorter.cm6',
+			'./contentScript.js',
+		);
+
+		await joplin.commands.register({
+			name: sortAtCursorCommand,
+			label: 'Sort TODO group at cursor',
+			//iconName: 'fas fa-rocket', // Optional FontAwesome icon
+			execute: async () => {
+				await joplin.commands.execute('editor.execCommand', {
+					name: 'sortTodoGroupAtCursor',
+					args: [],
+				});
+			},
+		});
+
+		await joplin.commands.register({
+			name: sortInNoteCommand,
+			label: 'Sort all TODO groups in note',
+			//iconName: 'fas fa-rocket', // Optional FontAwesome icon
+			execute: async () => {
+				await joplin.commands.execute('editor.execCommand', {
+					name: 'sortTodoGroupsInNote',
+					args: [],
+				});
+			},
+		});
+
+		const groupMenuItems = [
+            { commandName: sortAtCursorCommand },
+            { commandName: sortInNoteCommand }
+        ];
+
+        await joplin.views.menus.create(
+            'todo-group-sorter-menu',
+            'TODO Group Sorter',
+            groupMenuItems,
+            MenuItemLocation.Tools
+        );
 	},
 });

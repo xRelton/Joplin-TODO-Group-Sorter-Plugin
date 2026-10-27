@@ -154,3 +154,91 @@ export function findTodoGroups(lines: string[]): TodoGroup[] {
 export function findGroupAtLine(groups: TodoGroup[], line: number): TodoGroup | undefined {
 	return groups.find((group) => line >= group.startLine && line <= group.endLine);
 }
+
+function sortGroupLines(lines: string[], group: TodoGroup): string[] {
+	const baseIndent = indentWidth(lines[group.startLine]);
+	const items: { lines: string[]; checked: boolean; order: number }[] = [];
+	let current: { lines: string[]; checked: boolean; order: number } | undefined;
+
+	const saveCurrent = (): void => {
+		if (current) {
+			items.push(current);
+			current = undefined;
+		}
+	};
+
+	for (let i = group.startLine; i <= group.endLine; i++) {
+		const line = lines[i];
+
+		if (isTodoLine(line) && indentWidth(line) === baseIndent) {
+			saveCurrent();
+
+			const checkbox = /^\s*[-*+]\s+\[([ xX])\]/.exec(line);
+			current = {
+				lines: [line],
+				checked: checkbox?.[1].toLowerCase() === 'x',
+				order: items.length,
+			};
+		} else if (current) {
+			current.lines.push(line);
+		}
+	}
+	saveCurrent();
+
+	return items
+		.sort((a, b) => Number(a.checked) - Number(b.checked) || a.order - b.order)
+		.flatMap((item) => item.lines);
+}
+
+/** Sorts the top-level todo items in the group containing the given line.
+ *
+ * Returns the new lines and the group that was sorted, or undefined if there
+ * is no group at that line.
+ */
+export function sortTopLevelGroupAtLine(
+    lines: string[],
+    cursorLine: number,
+): { lines: string[]; group: TodoGroup } | undefined {
+    const group = findGroupAtLine(findTodoGroups(lines), cursorLine);
+    if (!group) {
+        return undefined;
+    }
+
+    const replacement = sortGroupLines(lines, group);
+
+    return {
+        lines: [
+            ...lines.slice(0, group.startLine),
+            ...replacement,
+            ...lines.slice(group.endLine + 1),
+        ],
+        group,
+    };
+}
+
+/** Sorts every todo group independently, preserving all other note lines.
+ *
+ * Returns the transformed note and the ranges of groups whose contents changed.
+ */
+export function sortAllTodoGroups(
+	lines: string[],
+): { lines: string[]; changedGroups: TodoGroup[] } {
+	const sortedLines = lines.slice();
+	const changedGroups: TodoGroup[] = [];
+
+	for (const group of findTodoGroups(lines)) {
+		const replacement = sortGroupLines(lines, group);
+		const previous = lines.slice(group.startLine, group.endLine + 1);
+		if (
+			replacement.length === previous.length &&
+			replacement.every((line, index) => line === previous[index])
+		) {
+			continue;
+		}
+
+		sortedLines.splice(group.startLine, previous.length, ...replacement);
+		changedGroups.push(group);
+	}
+
+	return { lines: sortedLines, changedGroups };
+}

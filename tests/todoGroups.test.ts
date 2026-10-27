@@ -2,8 +2,9 @@ import { describe, it, expect } from 'vitest';
 import {
 	findTodoGroups,
 	findGroupAtLine,
+	findTodoItems,
 	sortAllTodoGroups,
-	sortTopLevelGroupAtLine,
+	sortTodoGroupAtLine,
 	splitLines,
 } from '../src/todoGroups';
 
@@ -145,7 +146,7 @@ describe('findGroupAtLine', () => {
 	});
 });
 
-describe('sortTopLevelGroupAtLine', () => {
+describe('sortTodoGroupAtLine', () => {
 	it('stably moves checked tasks to the bottom with their indented content', () => {
 		const lines = [
 			'- [x] completed',
@@ -155,7 +156,7 @@ describe('sortTopLevelGroupAtLine', () => {
 			'- [ ] second open',
 		];
 
-		expect(sortTopLevelGroupAtLine(lines, 1)).toEqual({
+		expect(sortTodoGroupAtLine(lines, 1)).toEqual({
 			lines: [
 				'- [ ] first open',
 				'  supporting note',
@@ -164,11 +165,83 @@ describe('sortTopLevelGroupAtLine', () => {
 				'  - [ ] child',
 			],
 			group: { startLine: 0, endLine: 4 },
+			change: {
+				startLine: 0,
+				endLine: 4,
+				replacementLines: [
+					'- [ ] first open',
+					'  supporting note',
+					'- [ ] second open',
+					'- [x] completed',
+					'  - [ ] child',
+				],
+			},
 		});
 	});
 
+	it('keeps task order stable within checked and unchecked partitions', () => {
+		const lines = [
+			'- [x] done first',
+			'- [ ] open first',
+			'- [X] done second',
+			'- [ ] open second',
+		];
+
+		expect(sortTodoGroupAtLine(lines, 0)?.lines).toEqual([
+			'- [ ] open first',
+			'- [ ] open second',
+			'- [x] done first',
+			'- [X] done second',
+		]);
+	});
+
 	it('returns undefined when the cursor is outside a todo group', () => {
-		expect(sortTopLevelGroupAtLine(['plain text', '- [ ] task'], 0)).toBeUndefined();
+		expect(sortTodoGroupAtLine(['plain text', '- [ ] task'], 0)).toBeUndefined();
+	});
+});
+
+describe('findTodoItems', () => {
+	it('builds a task hierarchy with inclusive source line ranges', () => {
+		const lines = [
+			'- [ ] parent',
+			'  - [x] child',
+			'    - [ ] grandchild',
+			'- [x] sibling',
+		];
+		const group = findTodoGroups(lines)[0];
+
+		expect(findTodoItems(lines, group)).toEqual([
+			{
+				startLine: 0,
+				endLine: 2,
+				indent: 0,
+				checked: false,
+				children: [
+					{
+						startLine: 1,
+						endLine: 2,
+						indent: 2,
+						checked: true,
+						children: [
+							{
+								startLine: 2,
+								endLine: 2,
+								indent: 4,
+								checked: false,
+								children: [],
+							},
+						],
+					},
+				],
+			},
+			{
+				startLine: 3,
+				endLine: 3,
+				indent: 0,
+				checked: true,
+				children: [],
+			},
+		]);
 	});
 });
 
@@ -204,6 +277,62 @@ describe('sortAllTodoGroups', () => {
 				{ startLine: 1, endLine: 2 },
 				{ startLine: 6, endLine: 8 },
 			],
+			changes: [
+				{
+					startLine: 1,
+					endLine: 2,
+					replacementLines: ['- [ ] first open', '- [x] first done'],
+				},
+				{
+					startLine: 6,
+					endLine: 8,
+					replacementLines: [
+						'- [ ] second open',
+						'  - [x] child stays attached',
+						'- [X] second done',
+					],
+				},
+			],
+		});
+	});
+
+	it('sorts siblings recursively while keeping each child subtree with its parent', () => {
+		const lines = [
+			'- [ ] parent',
+			'  - [x] child done first',
+			'    - [x] grandchild done',
+			'    - [ ] grandchild open',
+			'  - [x] child done second',
+			'  - [ ] child open first',
+			'  - [ ] child open second',
+			'- [x] completed parent',
+			'  - [ ] its child remains attached',
+		];
+
+		expect(sortAllTodoGroups(lines).lines).toEqual([
+			'- [ ] parent',
+			'  - [ ] child open first',
+			'  - [ ] child open second',
+			'  - [x] child done first',
+			'    - [ ] grandchild open',
+			'    - [x] grandchild done',
+			'  - [x] child done second',
+			'- [x] completed parent',
+			'  - [ ] its child remains attached',
+		]);
+	});
+
+	it('reports only the changed line span, preserving an unchanged group prefix', () => {
+		const lines = ['- [ ] unchanged', '- [x] done', '- [ ] open'];
+
+		expect(sortAllTodoGroups(lines)).toEqual({
+			lines: ['- [ ] unchanged', '- [ ] open', '- [x] done'],
+			changedGroups: [{ startLine: 0, endLine: 2 }],
+			changes: [{
+				startLine: 1,
+				endLine: 2,
+				replacementLines: ['- [ ] open', '- [x] done'],
+			}],
 		});
 	});
 
@@ -213,6 +342,7 @@ describe('sortAllTodoGroups', () => {
 		expect(sortAllTodoGroups(lines)).toEqual({
 			lines,
 			changedGroups: [],
+			changes: [],
 		});
 	});
 
@@ -222,6 +352,7 @@ describe('sortAllTodoGroups', () => {
 		expect(sortAllTodoGroups(lines)).toEqual({
 			lines,
 			changedGroups: [],
+			changes: [],
 		});
 	});
 });

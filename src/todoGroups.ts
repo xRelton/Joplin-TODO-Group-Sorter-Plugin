@@ -12,6 +12,20 @@ export interface TodoGroup {
 	endLine: number;
 }
 
+export interface TodoItem {
+	startLine: number;
+	endLine: number;
+	indent: number;
+	checked: boolean;
+	children: TodoItem[];
+}
+
+export interface TodoLineChange {
+	startLine: number;
+	endLine: number;
+	replacementLines: string[];
+}
+
 interface Fence {
 	char: string;
 	length: number;
@@ -155,65 +169,158 @@ export function findGroupAtLine(groups: TodoGroup[], line: number): TodoGroup | 
 	return groups.find((group) => line >= group.startLine && line <= group.endLine);
 }
 
-function sortGroupLines(lines: string[], group: TodoGroup): string[] {
-	const baseIndent = indentWidth(lines[group.startLine]);
-	const items: { lines: string[]; checked: boolean; order: number }[] = [];
-	let current: { lines: string[]; checked: boolean; order: number } | undefined;
+/** Builds the task hierarchy inside a detected group. */
+export function findTodoItems(lines: string[], group: TodoGroup): TodoItem[] {
+	const roots: TodoItem[] = [];
+	const parents: TodoItem[] = [];
 
-	const saveCurrent = (): void => {
-		if (current) {
-			items.push(current);
-			current = undefined;
+	for (let lineIndex = group.startLine; lineIndex <= group.endLine; lineIndex++) {
+		const line = lines[lineIndex];
+		if (!isTodoLine(line)) {
+			continue;
 		}
-	};
 
-	for (let i = group.startLine; i <= group.endLine; i++) {
-		const line = lines[i];
-
-		if (isTodoLine(line) && indentWidth(line) === baseIndent) {
-			saveCurrent();
-
-			const checkbox = /^\s*[-*+]\s+\[([ xX])\]/.exec(line);
-			current = {
-				lines: [line],
-				checked: checkbox?.[1].toLowerCase() === 'x',
-				order: items.length,
-			};
-		} else if (current) {
-			current.lines.push(line);
+		const indent = indentWidth(line);
+		while (parents.length > 0 && parents[parents.length - 1].indent >= indent) {
+			parents[parents.length - 1].endLine = lineIndex - 1;
+			parents.pop();
 		}
+
+		const checkbox = /^\s*[-*+]\s+\[([ xX])\]/.exec(line);
+		const item: TodoItem = {
+			startLine: lineIndex,
+			endLine: group.endLine,
+			indent,
+			checked: checkbox?.[1].toLowerCase() === 'x',
+			children: [],
+		};
+
+		if (parents.length > 0) {
+			parents[parents.length - 1].children.push(item);
+		} else {
+			roots.push(item);
+		}
+		parents.push(item);
 	}
-	saveCurrent();
 
-	return items
-		.sort((a, b) => Number(a.checked) - Number(b.checked) || a.order - b.order)
-		.flatMap((item) => item.lines);
+	return roots;
 }
 
-/** Sorts the top-level todo items in the group containing the given line.
+function sortSiblingItems(lines: string[], items: TodoItem[]): string[] {
+	const output: string[] = [];
+	let runStart = 0;
+
+	while (runStart < items.length) {
+		let runEnd = runStart + 1;
+		while (runEnd < items.length && items[runEnd].indent === items[runStart].indent) {
+			runEnd++;
+		}
+
+		const sortedRun = items.slice(runStart, runEnd).sort(
+			(a, b) => Number(a.checked) - Number(b.checked) || a.startLine - b.startLine,
+		);
+		for (const item of sortedRun) {
+			output.push(...renderTodoItem(lines, item));
+		}
+		runStart = runEnd;
+	}
+
+	return output;
+}
+
+function renderTodoItem(lines: string[], item: TodoItem): string[] {
+	const output = [lines[item.startLine]];
+	let nextLine = item.startLine + 1;
+	let childIndex = 0;
+
+	while (childIndex < item.children.length) {
+		let runEnd = childIndex + 1;
+		while (
+			runEnd < item.children.length &&
+			item.children[runEnd].indent === item.children[childIndex].indent
+		) {
+			runEnd++;
+		}
+
+		const childRun = item.children.slice(childIndex, runEnd);
+		const firstChild = childRun[0];
+		const lastChild = childRun[childRun.length - 1];
+		output.push(...lines.slice(nextLine, firstChild.startLine));
+		output.push(...sortSiblingItems(lines, childRun));
+		nextLine = lastChild.endLine + 1;
+		childIndex = runEnd;
+	}
+
+	output.push(...lines.slice(nextLine, item.endLine + 1));
+	return output;
+}
+
+function sortGroupLines(lines: string[], group: TodoGroup): string[] {
+	return sortSiblingItems(lines, findTodoItems(lines, group));
+}
+
+function findChangedLineSpan(
+	originalLines: string[],
+	sortedLines: string[],
+	startLine: number,
+): TodoLineChange | undefined {
+	let prefixLength = 0;
+	while (
+		prefixLength < originalLines.length &&
+		originalLines[prefixLength] === sortedLines[prefixLength]
+	) {
+		prefixLength++;
+	}
+
+	let suffixLength = 0;
+	while (
+		suffixLength < originalLines.length - prefixLength &&
+		suffixLength < sortedLines.length - prefixLength &&
+		originalLines[originalLines.length - 1 - suffixLength] ===
+			sortedLines[sortedLines.length - 1 - suffixLength]
+	) {
+		suffixLength++;
+	}
+
+	if (prefixLength === originalLines.length && prefixLength === sortedLines.length) {
+		return undefined;
+	}
+
+	return {
+		startLine: startLine + prefixLength,
+		endLine: startLine + originalLines.length - suffixLength - 1,
+		replacementLines: sortedLines.slice(prefixLength, sortedLines.length - suffixLength),
+	};
+}
+
+/** Sorts todo siblings at every level in the group containing the given line.
  *
  * Returns the new lines and the group that was sorted, or undefined if there
- * is no group at that line.
+ * is no group at that line. `change` describes the smallest contiguous span
+ * that needs replacing in the original note.
  */
-export function sortTopLevelGroupAtLine(
-    lines: string[],
-    cursorLine: number,
-): { lines: string[]; group: TodoGroup } | undefined {
-    const group = findGroupAtLine(findTodoGroups(lines), cursorLine);
-    if (!group) {
-        return undefined;
-    }
+export function sortTodoGroupAtLine(
+	lines: string[],
+	cursorLine: number,
+): { lines: string[]; group: TodoGroup; change?: TodoLineChange } | undefined {
+	const group = findGroupAtLine(findTodoGroups(lines), cursorLine);
+	if (!group) {
+		return undefined;
+	}
 
-    const replacement = sortGroupLines(lines, group);
+	const replacement = sortGroupLines(lines, group);
+	const previous = lines.slice(group.startLine, group.endLine + 1);
+	const change = findChangedLineSpan(previous, replacement, group.startLine);
 
-    return {
-        lines: [
-            ...lines.slice(0, group.startLine),
-            ...replacement,
-            ...lines.slice(group.endLine + 1),
-        ],
-        group,
-    };
+	return {
+		lines: [
+			...lines.slice(0, group.startLine),
+			...replacement,
+			...lines.slice(group.endLine + 1),
+		],
+		group,
+		change,
+	};
 }
 
 /** Sorts every todo group independently, preserving all other note lines.
@@ -222,23 +329,23 @@ export function sortTopLevelGroupAtLine(
  */
 export function sortAllTodoGroups(
 	lines: string[],
-): { lines: string[]; changedGroups: TodoGroup[] } {
+): { lines: string[]; changedGroups: TodoGroup[]; changes: TodoLineChange[] } {
 	const sortedLines = lines.slice();
 	const changedGroups: TodoGroup[] = [];
+	const changes: TodoLineChange[] = [];
 
 	for (const group of findTodoGroups(lines)) {
 		const replacement = sortGroupLines(lines, group);
 		const previous = lines.slice(group.startLine, group.endLine + 1);
-		if (
-			replacement.length === previous.length &&
-			replacement.every((line, index) => line === previous[index])
-		) {
+		const change = findChangedLineSpan(previous, replacement, group.startLine);
+		if (!change) {
 			continue;
 		}
 
 		sortedLines.splice(group.startLine, previous.length, ...replacement);
 		changedGroups.push(group);
+		changes.push(change);
 	}
 
-	return { lines: sortedLines, changedGroups };
+	return { lines: sortedLines, changedGroups, changes };
 }

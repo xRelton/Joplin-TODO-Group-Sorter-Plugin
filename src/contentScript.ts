@@ -1,5 +1,30 @@
 import { MarkdownEditorContentScriptModule, ContentScriptContext } from 'api/types';
-import { sortAllTodoGroups, sortTopLevelGroupAtLine } from './todoGroups';
+import { sortAllTodoGroups, sortTodoGroupAtLine } from './todoGroups';
+
+interface EditorLine {
+	number: number;
+	from: number;
+}
+
+interface EditorDocument {
+	lineAt(position: number): EditorLine;
+}
+
+function lineColumnAt(
+	document: EditorDocument,
+	position: number,
+): { line: number; column: number } {
+	const line = document.lineAt(position);
+	return { line: line.number - 1, column: position - line.from };
+}
+
+function positionAtLineColumn(lines: string[], line: number, column: number): number {
+	let position = 0;
+	for (let i = 0; i < line; i++) {
+		position += lines[i].length + 1;
+	}
+	return position + Math.min(column, lines[line]?.length ?? 0);
+}
 
 export default (_context: ContentScriptContext): MarkdownEditorContentScriptModule => ({
 	plugin: (codeMirrorWrapper) => {
@@ -11,51 +36,33 @@ export default (_context: ContentScriptContext): MarkdownEditorContentScriptModu
 			const editor = codeMirrorWrapper.editor;
 			const document = editor.state.doc;
 			const cursor = editor.state.selection.main.head;
-			const cursorLine = document.lineAt(cursor);
-			const cursorLineIndex = cursorLine.number - 1;
+			const anchor = editor.state.selection.main.anchor;
+			const cursorPosition = lineColumnAt(document, cursor);
+			const anchorPosition = lineColumnAt(document, anchor);
 			const lines = document.toString().split('\n');
-			const result = sortTopLevelGroupAtLine(lines, cursorLineIndex);
+			const result = sortTodoGroupAtLine(lines, cursorPosition.line);
 
-			if (!result) {
+			if (!result || !result.change) {
 				return false;
 			}
-
-			const replacementLines = result.lines.slice(
-				result.group.startLine,
-				result.group.endLine + 1,
-			);
-			const previousLines = lines.slice(
-				result.group.startLine,
-				result.group.endLine + 1,
-			);
-
-			if (
-				replacementLines.length === previousLines.length &&
-				replacementLines.every((line, index) => line === previousLines[index])
-			) {
-				return false;
-			}
-
-			const from = document.line(result.group.startLine + 1).from;
-			const to = document.line(result.group.endLine + 1).to;
-			const lineOffset = cursorLineIndex - result.group.startLine;
-			const nextCursorLine = replacementLines[lineOffset];
-			let nextCursor = from;
-
-			for (let i = 0; i < lineOffset; i++) {
-				nextCursor += replacementLines[i].length + 1;
-			}
-			nextCursor += Math.min(cursor - cursorLine.from, nextCursorLine.length);
 
 			editor.dispatch({
 				changes: {
-					from,
-					to,
-					insert: replacementLines.join('\n'),
+					from: document.line(result.change.startLine + 1).from,
+					to: document.line(result.change.endLine + 1).to,
+					insert: result.change.replacementLines.join('\n'),
 				},
 				selection: {
-					anchor: nextCursor,
-					head: nextCursor,
+					anchor: positionAtLineColumn(
+						result.lines,
+						anchorPosition.line,
+						anchorPosition.column,
+					),
+					head: positionAtLineColumn(
+						result.lines,
+						cursorPosition.line,
+						cursorPosition.column,
+					),
 				},
 			});
 
@@ -67,20 +74,23 @@ export default (_context: ContentScriptContext): MarkdownEditorContentScriptModu
 			const doc = editor.state.doc;
 			const lines = doc.toString().split('\n');
 			const result = sortAllTodoGroups(lines);
-			const changes = result.changedGroups.map((group) => ({
-				from: doc.line(group.startLine + 1).from,
-				to: doc.line(group.endLine + 1).to,
-				insert: result.lines.slice(group.startLine, group.endLine + 1).join('\n'),
+			if (result.changes.length === 0) return false;
+
+			const selection = editor.state.selection.main;
+			const anchor = lineColumnAt(doc, selection.anchor);
+			const head = lineColumnAt(doc, selection.head);
+			const changes = result.changes.map((change) => ({
+				from: doc.line(change.startLine + 1).from,
+				to: doc.line(change.endLine + 1).to,
+				insert: change.replacementLines.join('\n'),
 			}));
 
-			if (changes.length === 0) return false;
-
-			// Apply bottom-up in one transaction. Because CodeMirror 6 resolves
-			// simultaneous changes against the original document, we can pass all
-			// of them in a single dispatch — one undo entry, no intermediate states.
 			editor.dispatch({
 				changes,
-				selection: { anchor: changes[0].from, head: changes[0].from },
+				selection: {
+					anchor: positionAtLineColumn(result.lines, anchor.line, anchor.column),
+					head: positionAtLineColumn(result.lines, head.line, head.column),
+				},
 			});
 
 			return true;

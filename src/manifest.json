@@ -1,6 +1,6 @@
 {
 	"manifest_version": 1,
-	"id": "com.ori.todo-group-sorter",
+	"id": "com.xrelton.todo-group-sorter",
 	"app_min_version": "3.7",
 	"version": "1.0.0",
 	"name": "TODO Group Sorter",

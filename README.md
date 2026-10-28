@@ -1,9 +1,3 @@
-# Joplin Plugin
-
-This is your new Joplin plugin. It is suggested that you use this README file to document your plugin.
-
-For information on how to build or publish the plugin, please see [GENERATOR_DOC.md](./GENERATOR_DOC.md)
-
 # Description
 
 Plugin to group TODO lists inside Joplin notes and apply a sorting algorithm to them so that ticked items go to the bottom of the list.
@@ -12,10 +6,13 @@ The cursor-sort command operates through Joplin's CodeMirror 6 editor. It is ava
 
 Use **Tools → TODO Group Sorter → Move TODO item up/down** to move the task under the cursor together with its subtasks among its siblings. The commands do nothing if there is no sibling in the requested direction. Both commands are labeled and can be assigned shortcuts in Joplin's Keyboard Shortcuts settings.
 
+Auto-sort can be enabled in the plugin's **TODO Group Sorter** settings section. When enabled, changing a task's checkbox re-sorts only its group after the configured delay (50 ms by default). Auto-sort is off by default. The checkbox toggle and delayed reorder are separate undo steps: undo once to restore the previous order, then undo again to revert the checkbox.
+
+When a Markdown note is opened or loaded in the CM6 editor, the plugin automatically changes uppercase checked TODO markers (`[X]`) to lowercase (`[x]`). Joplin displays both forms as checked, but its checkbox click handler only toggles lowercase `[x]`; this normalization lets those checkboxes be unticked. It changes only TODO markers (not code examples or ordinary text), preserves their checked state, and is not an undoable edit.
 
 # Feature list plan
 
-v1 (the short-term target)
+v1 (implemented)
 
     - Group detection. A group is a run of list lines (-, * or +, with [ ], [x] or [X]) plus their indented children. It ends at a blank line, a non-list line or the end of the note. Fenced code blocks are ignored.
     - Sort group at cursor. One command, no selection needed.
@@ -25,13 +22,10 @@ v1 (the short-term target)
     - Minimal, undoable edits. Only the changed lines are rewritten, the cursor stays put, and the whole sort undoes in one step.
     - Shortcuts and menu entries. Rebindable in Keyboard Shortcuts, so no more Ctrl+Alt clashes.
     - Move item up/down with its sub-tasks. This is a cheap stand-in for drag and drop, and better than the native Alt+Up/Down because it moves the whole subtree.
-
-v1.1
-
     - Auto-sort toggle in plugin settings, off by default. When enabled, it re-sorts only the group where a checkbox state just changed, debounced, and never while you’re typing in a line.
 
 v2
 
     - Remember original positions so unticking restores the item to where it started.
     - Per-group opt-in via a marker, with a warning about Rich Text stripping it.
-    - Deal with rich-text oddities for TODO lists
+    - Deal with Rich Text oddities for TODO lists

@@ -1,43 +1,67 @@
 import joplin from 'api';
-import { ContentScriptType, MenuItem, MenuItemLocation } from 'api/types';
+import { ContentScriptType, MenuItem, MenuItemLocation, SettingItemType } from 'api/types';
 
-const sortAtCursorCommand = 'com.ori.todo-group-sorter.sortAtCursor';
-const sortInNoteCommand = 'com.ori.todo-group-sorter.sortInNote';
-const moveItemUpCommand = 'com.ori.todo-group-sorter.moveItemUp';
-const moveItemDownCommand = 'com.ori.todo-group-sorter.moveItemDown';
+const sortAtCursorCommand = 'com.xrelton.todo-group-sorter.sortAtCursor';
+const sortInNoteCommand = 'com.xrelton.todo-group-sorter.sortInNote';
+const moveItemUpCommand = 'com.xrelton.todo-group-sorter.moveItemUp';
+const moveItemDownCommand = 'com.xrelton.todo-group-sorter.moveItemDown';
 
 joplin.plugins.register({
 	onStart: async function () {
+		await joplin.settings.registerSection('todoGroupSorter', {
+			label: 'TODO Group Sorter',
+		});
+
+		await joplin.settings.registerSettings({
+			autoSort: {
+				section: 'todoGroupSorter',
+				public: true,
+				type: SettingItemType.Bool,
+				value: false,
+				label: 'Auto-sort when a checkbox is toggled',
+			},
+			autoSortDelayMs: {
+				section: 'todoGroupSorter',
+				public: true,
+				type: SettingItemType.Int,
+				value: 50,
+				label: 'Auto-sort delay (ms)',
+			},
+		});
+
+		await joplin.contentScripts.onMessage('com.xrelton.todo-group-sorter.cm6', async (message) => {
+			if (message !== 'getAutoSortSettings') {
+				return undefined;
+			}
+			return joplin.settings.values(['autoSort', 'autoSortDelayMs']);
+		});
+
 		await joplin.contentScripts.register(
 			ContentScriptType.CodeMirrorPlugin,
-			'com.ori.todo-group-sorter.cm6',
+			'com.xrelton.todo-group-sorter.cm6',
 			'./contentScript.js',
 		);
 
 		await joplin.commands.register({
 			name: sortAtCursorCommand,
 			label: 'TODO Group Sorter: Sort group at cursor',
-			//iconName: 'fas fa-rocket', // Optional FontAwesome icon
 			execute: async () => {
 				await joplin.commands.execute('editor.execCommand', {
 					name: 'sortTodoGroupAtCursor',
 					args: [],
 				});
 			},
-			enabledCondition: 'noteIsMarkdown',
 		});
 
 		await joplin.commands.register({
 			name: sortInNoteCommand,
 			label: 'TODO Group Sorter: Sort all groups in note',
-			//iconName: 'fas fa-rocket', // Optional FontAwesome icon
 			execute: async () => {
 				await joplin.commands.execute('editor.execCommand', {
 					name: 'sortTodoGroupsInNote',
 					args: [],
 				});
 			},
-			enabledCondition: 'noteIsMarkdown',
 		});
 
 		await joplin.commands.register({

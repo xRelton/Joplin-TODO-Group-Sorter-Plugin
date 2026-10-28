@@ -4,7 +4,9 @@ import {
 	findGroupAtLine,
 	findTodoItems,
 	moveTodoItemAtLine,
+	normalizeUppercaseCheckedMarkers,
 	sortAllTodoGroups,
+	sortTodoGroupsAtLines,
 	sortTodoGroupAtLine,
 	splitLines,
 } from '../src/todoGroups';
@@ -128,6 +130,35 @@ describe('findTodoGroups', () => {
 
 	it('returns an empty list when there are no todos', () => {
 		expect(findTodoGroups(['hello', '', '- just a bullet'])).toEqual([]);
+	});
+});
+
+describe('normalizeUppercaseCheckedMarkers', () => {
+	it('lowercases uppercase checked markers in todo groups only', () => {
+		const lines = [
+			'```md',
+			'- [X] code sample',
+			'```',
+			'- [X] checked task',
+			'  - [X] checked subtask',
+			'',
+			'Plain [X] text',
+		];
+
+		expect(normalizeUppercaseCheckedMarkers(lines)).toEqual([
+			'```md',
+			'- [X] code sample',
+			'```',
+			'- [x] checked task',
+			'  - [x] checked subtask',
+			'',
+			'Plain [X] text',
+		]);
+	});
+
+	it('leaves lines unchanged when there are no uppercase checked tasks', () => {
+		const lines = ['- [ ] open', '- [x] checked'];
+		expect(normalizeUppercaseCheckedMarkers(lines)).toEqual(lines);
 	});
 });
 
@@ -315,6 +346,28 @@ describe('moveTodoItemAtLine', () => {
 		});
 	});
 
+	it('advances the cursor across identical siblings so they do not trap movement', () => {
+		const lines = ['- [ ] sd', '- [ ] sd', '- [ ] next'];
+		const result = moveTodoItemAtLine(lines, 0, 1);
+
+		expect(result).toEqual({
+			lines,
+			change: undefined,
+			lineMappings: [
+				{ startLine: 0, endLine: 0, newStartLine: 1 },
+				{ startLine: 1, endLine: 1, newStartLine: 0 },
+			],
+		});
+
+		const secondMove = moveTodoItemAtLine(lines, 1, 1);
+		expect(secondMove?.lines).toEqual(['- [ ] sd', '- [ ] next', '- [ ] sd']);
+		expect(secondMove?.lineMappings[0]).toEqual({
+			startLine: 1,
+			endLine: 1,
+			newStartLine: 2,
+		});
+	});
+
 	it('does not cross parent or group boundaries', () => {
 		const lines = [
 			'- [ ] parent',
@@ -439,6 +492,58 @@ describe('sortAllTodoGroups', () => {
 		const lines = ['- [ ] open', '- [x] done', '', '- [ ] another open'];
 
 		expect(sortAllTodoGroups(lines)).toEqual({
+			lines,
+			changedGroups: [],
+			changes: [],
+		});
+	});
+});
+
+describe('sortTodoGroupsAtLines', () => {
+	it('sorts only the group containing a toggled checkbox line', () => {
+		const lines = [
+			'- [x] first done',
+			'- [ ] first open',
+			'',
+			'- [x] second done',
+			'- [ ] second open',
+		];
+
+		expect(sortTodoGroupsAtLines(lines, [4])).toEqual({
+			lines: [
+				'- [x] first done',
+				'- [ ] first open',
+				'',
+				'- [ ] second open',
+				'- [x] second done',
+			],
+			changedGroups: [{ startLine: 3, endLine: 4 }],
+			changes: [{
+				startLine: 3,
+				endLine: 4,
+				replacementLines: ['- [ ] second open', '- [x] second done'],
+			}],
+		});
+	});
+
+	it('sorts a touched group only once when several of its tasks were toggled', () => {
+		const lines = ['- [x] done', '- [ ] open', '', '- [ ] separate'];
+
+		expect(sortTodoGroupsAtLines(lines, [0, 1])).toEqual({
+			lines: ['- [ ] open', '- [x] done', '', '- [ ] separate'],
+			changedGroups: [{ startLine: 0, endLine: 1 }],
+			changes: [{
+				startLine: 0,
+				endLine: 1,
+				replacementLines: ['- [ ] open', '- [x] done'],
+			}],
+		});
+	});
+
+	it('returns no changes when no target line belongs to a todo group', () => {
+		const lines = ['ordinary text', '', '- [x] done'];
+
+		expect(sortTodoGroupsAtLines(lines, [0])).toEqual({
 			lines,
 			changedGroups: [],
 			changes: [],

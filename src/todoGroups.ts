@@ -57,6 +57,24 @@ export function isTodoLine(line: string): boolean {
 	return TODO_REGEX.test(line);
 }
 
+/** Normalizes uppercase checked markers in detected TODO groups for Joplin's checkbox toggle. */
+export function normalizeUppercaseCheckedMarkers(lines: string[]): string[] {
+	const normalized = lines.slice();
+
+	for (const group of findTodoGroups(lines)) {
+		for (let line = group.startLine; line <= group.endLine; line++) {
+			if (isTodoLine(lines[line])) {
+				normalized[line] = lines[line].replace(
+					/^(\s*[-*+]\s+\[)X(\])/,
+					'$1x$2',
+				);
+			}
+		}
+	}
+
+	return normalized;
+}
+
 /** Width of the leading whitespace of a line, with tabs expanded. */
 export function indentWidth(line: string): number {
 	let width = 0;
@@ -328,7 +346,7 @@ export function moveTodoItemAtLine(
 	lines: string[],
 	cursorLine: number,
 	direction: -1 | 1,
-): { lines: string[]; change: TodoLineChange; lineMappings: TodoLineMapping[] } | undefined {
+): { lines: string[]; change?: TodoLineChange; lineMappings: TodoLineMapping[] } | undefined {
 	const group = findGroupAtLine(findTodoGroups(lines), cursorLine);
 	if (!group) {
 		return undefined;
@@ -359,9 +377,6 @@ export function moveTodoItemAtLine(
 	const swappedBlocks = [...secondBlock, ...firstBlock];
 	reorderedGroup.splice(relativeStart, relativeEnd - relativeStart, ...swappedBlocks);
 	const change = findChangedLineSpan(originalGroup, reorderedGroup, group.startLine);
-	if (!change) {
-		return undefined;
-	}
 
 	return {
 		lines: [
@@ -433,6 +448,34 @@ export function sortAllTodoGroups(
 	for (const group of findTodoGroups(lines)) {
 		const replacement = sortGroupLines(lines, group);
 		const previous = lines.slice(group.startLine, group.endLine + 1);
+		const change = findChangedLineSpan(previous, replacement, group.startLine);
+		if (!change) {
+			continue;
+		}
+
+		sortedLines.splice(group.startLine, previous.length, ...replacement);
+		changedGroups.push(group);
+		changes.push(change);
+	}
+
+	return { lines: sortedLines, changedGroups, changes };
+}
+
+/** Sorts only groups containing one of the specified 0-based line numbers. */
+export function sortTodoGroupsAtLines(
+	lines: string[],
+	targetLines: number[],
+): { lines: string[]; changedGroups: TodoGroup[]; changes: TodoLineChange[] } {
+	const targetGroups = findTodoGroups(lines).filter((group) =>
+		targetLines.some((line) => line >= group.startLine && line <= group.endLine),
+	);
+	const sortedLines = lines.slice();
+	const changedGroups: TodoGroup[] = [];
+	const changes: TodoLineChange[] = [];
+
+	for (const group of targetGroups) {
+		const previous = lines.slice(group.startLine, group.endLine + 1);
+		const replacement = sortGroupLines(lines, group);
 		const change = findChangedLineSpan(previous, replacement, group.startLine);
 		if (!change) {
 			continue;

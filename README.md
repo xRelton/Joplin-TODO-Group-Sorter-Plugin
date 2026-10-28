@@ -10,6 +10,8 @@ Plugin to group TODO lists inside Joplin notes and apply a sorting algorithm to 
 
 The cursor-sort command operates through Joplin's CodeMirror 6 editor. It is available when a Markdown note is open in that editor; the legacy CodeMirror 5 editor is not supported.
 
+Use **Tools → TODO Group Sorter → Move TODO item up/down** to move the task under the cursor together with its subtasks among its siblings. The commands do nothing if there is no sibling in the requested direction. Both commands are labeled and can be assigned shortcuts in Joplin's Keyboard Shortcuts settings.
+
 
 # Feature list plan
 
@@ -28,7 +30,8 @@ v1.1
 
     - Auto-sort toggle in plugin settings, off by default. When enabled, it re-sorts only the group where a checkbox state just changed, debounced, and never while you’re typing in a line.
 
-v2 / stretch
+v2
 
     - Remember original positions so unticking restores the item to where it started.
     - Per-group opt-in via a marker, with a warning about Rich Text stripping it.
+    - Deal with rich-text oddities for TODO lists

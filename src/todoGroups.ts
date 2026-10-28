@@ -26,6 +26,12 @@ export interface TodoLineChange {
 	replacementLines: string[];
 }
 
+export interface TodoLineMapping {
+	startLine: number;
+	endLine: number;
+	newStartLine: number;
+}
+
 interface Fence {
 	char: string;
 	length: number;
@@ -259,6 +265,26 @@ function sortGroupLines(lines: string[], group: TodoGroup): string[] {
 	return sortSiblingItems(lines, findTodoItems(lines, group));
 }
 
+function findItemSiblingsAtLine(
+	items: TodoItem[],
+	line: number,
+): { siblings: TodoItem[]; index: number } | undefined {
+	for (let index = 0; index < items.length; index++) {
+		const item = items[index];
+		if (line < item.startLine || line > item.endLine) {
+			continue;
+		}
+
+		const childResult = findItemSiblingsAtLine(item.children, line);
+		if (childResult) {
+			return childResult;
+		}
+
+		return { siblings: items, index };
+	}
+	return undefined;
+}
+
 function findChangedLineSpan(
 	originalLines: string[],
 	sortedLines: string[],
@@ -290,6 +316,76 @@ function findChangedLineSpan(
 		startLine: startLine + prefixLength,
 		endLine: startLine + originalLines.length - suffixLength - 1,
 		replacementLines: sortedLines.slice(prefixLength, sortedLines.length - suffixLength),
+	};
+}
+
+/** Moves the task at the given line one position among its siblings.
+ *
+ * A task's entire subtree moves with it. Returns undefined when the line is
+ * outside a task group, or when the task has no sibling in that direction.
+ */
+export function moveTodoItemAtLine(
+	lines: string[],
+	cursorLine: number,
+	direction: -1 | 1,
+): { lines: string[]; change: TodoLineChange; lineMappings: TodoLineMapping[] } | undefined {
+	const group = findGroupAtLine(findTodoGroups(lines), cursorLine);
+	if (!group) {
+		return undefined;
+	}
+
+	const roots = findTodoItems(lines, group);
+	const target = findItemSiblingsAtLine(roots, cursorLine);
+	if (!target) {
+		return undefined;
+	}
+
+	const otherIndex = target.index + direction;
+	if (otherIndex < 0 || otherIndex >= target.siblings.length) {
+		return undefined;
+	}
+
+	const originalGroup = lines.slice(group.startLine, group.endLine + 1);
+	const firstItem = target.siblings[Math.min(target.index, otherIndex)];
+	const secondItem = target.siblings[Math.max(target.index, otherIndex)];
+	const firstBlock = lines.slice(firstItem.startLine, firstItem.endLine + 1);
+	const secondBlock = lines.slice(secondItem.startLine, secondItem.endLine + 1);
+	const movedItem = target.siblings[target.index];
+	const otherItem = target.siblings[otherIndex];
+	const firstBlockNewStartLine = firstItem.startLine + secondBlock.length;
+	const reorderedGroup = originalGroup.slice();
+	const relativeStart = firstItem.startLine - group.startLine;
+	const relativeEnd = secondItem.endLine - group.startLine + 1;
+	const swappedBlocks = [...secondBlock, ...firstBlock];
+	reorderedGroup.splice(relativeStart, relativeEnd - relativeStart, ...swappedBlocks);
+	const change = findChangedLineSpan(originalGroup, reorderedGroup, group.startLine);
+	if (!change) {
+		return undefined;
+	}
+
+	return {
+		lines: [
+			...lines.slice(0, group.startLine),
+			...reorderedGroup,
+			...lines.slice(group.endLine + 1),
+		],
+		change,
+		lineMappings: [
+			{
+				startLine: movedItem.startLine,
+				endLine: movedItem.endLine,
+				newStartLine: movedItem === firstItem
+					? firstBlockNewStartLine
+					: firstItem.startLine,
+			},
+			{
+				startLine: otherItem.startLine,
+				endLine: otherItem.endLine,
+				newStartLine: otherItem === firstItem
+					? firstBlockNewStartLine
+					: firstItem.startLine,
+			},
+		],
 	};
 }
 

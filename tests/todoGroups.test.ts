@@ -3,6 +3,7 @@ import {
 	findTodoGroups,
 	findGroupAtLine,
 	findTodoItems,
+	moveTodoItemAtLine,
 	sortAllTodoGroups,
 	sortTodoGroupAtLine,
 	splitLines,
@@ -242,6 +243,94 @@ describe('findTodoItems', () => {
 				children: [],
 			},
 		]);
+	});
+});
+
+describe('moveTodoItemAtLine', () => {
+	it('moves a task and its entire subtree down among top-level siblings', () => {
+		const lines = [
+			'- [ ] first',
+			'  - [x] child',
+			'    - [ ] grandchild',
+			'- [ ] second',
+		];
+
+		expect(moveTodoItemAtLine(lines, 0, 1)).toEqual({
+			lines: [
+				'- [ ] second',
+				'- [ ] first',
+				'  - [x] child',
+				'    - [ ] grandchild',
+			],
+			change: {
+				startLine: 0,
+				endLine: 3,
+				replacementLines: [
+					'- [ ] second',
+					'- [ ] first',
+					'  - [x] child',
+					'    - [ ] grandchild',
+				],
+			},
+			lineMappings: [
+				{ startLine: 0, endLine: 2, newStartLine: 1 },
+				{ startLine: 3, endLine: 3, newStartLine: 0 },
+			],
+		});
+	});
+
+	it('moves a nested task only among its siblings', () => {
+		const lines = [
+			'- [ ] parent',
+			'  - [x] checked child',
+			'    - [ ] checked child subtask',
+			'  - [ ] open child',
+			'    - [x] open child subtask',
+			'- [ ] next parent',
+		];
+
+		expect(moveTodoItemAtLine(lines, 3, -1)).toEqual({
+			lines: [
+				'- [ ] parent',
+				'  - [ ] open child',
+				'    - [x] open child subtask',
+				'  - [x] checked child',
+				'    - [ ] checked child subtask',
+				'- [ ] next parent',
+			],
+			change: {
+				startLine: 1,
+				endLine: 4,
+				replacementLines: [
+					'  - [ ] open child',
+					'    - [x] open child subtask',
+					'  - [x] checked child',
+					'    - [ ] checked child subtask',
+				],
+			},
+			lineMappings: [
+				{ startLine: 3, endLine: 4, newStartLine: 1 },
+				{ startLine: 1, endLine: 2, newStartLine: 3 },
+			],
+		});
+	});
+
+	it('does not cross parent or group boundaries', () => {
+		const lines = [
+			'- [ ] parent',
+			'  - [ ] only child',
+			'',
+			'- [ ] separate group task',
+		];
+
+		expect(moveTodoItemAtLine(lines, 1, -1)).toBeUndefined();
+		expect(moveTodoItemAtLine(lines, 1, 1)).toBeUndefined();
+		expect(moveTodoItemAtLine(lines, 0, -1)).toBeUndefined();
+		expect(moveTodoItemAtLine(lines, 3, 1)).toBeUndefined();
+	});
+
+	it('returns undefined when the cursor is outside a todo group', () => {
+		expect(moveTodoItemAtLine(['plain text', '', '- [ ] task'], 0, 1)).toBeUndefined();
 	});
 });
 

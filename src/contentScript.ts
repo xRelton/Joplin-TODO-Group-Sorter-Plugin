@@ -1,5 +1,11 @@
 import { MarkdownEditorContentScriptModule, ContentScriptContext } from 'api/types';
-import { sortAllTodoGroups, sortTodoGroupAtLine } from './todoGroups';
+import {
+	moveTodoItemAtLine,
+	sortAllTodoGroups,
+	sortTodoGroupAtLine,
+	TodoLineMapping,
+	TodoLineChange,
+} from './todoGroups';
 
 interface EditorLine {
 	number: number;
@@ -24,6 +30,39 @@ function positionAtLineColumn(lines: string[], line: number, column: number): nu
 		position += lines[i].length + 1;
 	}
 	return position + Math.min(column, lines[line]?.length ?? 0);
+}
+
+function dispatchLineChange(
+	editor: any,
+	document: any,
+	lines: string[],
+	change: TodoLineChange,
+	lineMappings: TodoLineMapping[] = [],
+): void {
+	const selection = editor.state.selection.main;
+	const anchor = lineColumnAt(document, selection.anchor);
+	const head = lineColumnAt(document, selection.head);
+	const mapPosition = (position: { line: number; column: number }): number => {
+		const mapping = lineMappings.find(
+			(candidate) => position.line >= candidate.startLine && position.line <= candidate.endLine,
+		);
+		const mappedLine = mapping
+			? mapping.newStartLine + position.line - mapping.startLine
+			: position.line;
+		return positionAtLineColumn(lines, mappedLine, position.column);
+	};
+
+	editor.dispatch({
+		changes: {
+			from: document.line(change.startLine + 1).from,
+			to: document.line(change.endLine + 1).to,
+			insert: change.replacementLines.join('\n'),
+		},
+		selection: {
+			anchor: mapPosition(anchor),
+			head: mapPosition(head),
+		},
+	});
 }
 
 export default (_context: ContentScriptContext): MarkdownEditorContentScriptModule => ({
@@ -95,5 +134,34 @@ export default (_context: ContentScriptContext): MarkdownEditorContentScriptModu
 
 			return true;
 		});
+
+		const registerMoveCommand = (name: string, direction: -1 | 1): void => {
+			codeMirrorWrapper.registerCommand(name, () => {
+				const editor = codeMirrorWrapper.editor;
+				const document = editor.state.doc;
+				const lines = document.toString().split('\n');
+				const cursorLine = lineColumnAt(
+					document,
+					editor.state.selection.main.head,
+				).line;
+				const result = moveTodoItemAtLine(lines, cursorLine, direction);
+
+				if (!result) {
+					return false;
+				}
+
+				dispatchLineChange(
+					editor,
+					document,
+					result.lines,
+					result.change,
+					result.lineMappings,
+				);
+				return true;
+			});
+		};
+
+		registerMoveCommand('moveTodoItemUp', -1);
+		registerMoveCommand('moveTodoItemDown', 1);
 	},
 });
